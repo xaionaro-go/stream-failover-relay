@@ -1,0 +1,24 @@
+name: Install libav (Linux)
+description: >-
+  Installs FFmpeg 7 libav development packages on Ubuntu (24.04 runners) via
+  ppa:ubuntuhandbook1/ffmpeg7.
+
+runs:
+  using: composite
+  steps:
+    - shell: bash
+      run: |
+        set -euxo pipefail
+        sudo apt-get update
+        sudo apt-get install -y --no-install-recommends \
+          ca-certificates \
+          software-properties-common
+        sudo add-apt-repository -y ppa:ubuntuhandbook1/ffmpeg7
+        sudo apt-get update
+        sudo apt-get install -y --no-install-recommends \
+          pkg-config \
+          libavcodec-dev \
+          libavdevice-dev \
+          libavfilter-dev \
+          libavformat-dev \
+          libavutil-dev

@@ -4,13 +4,13 @@ go 1.24.4
 
 toolchain go1.24.11
 
-replace github.com/asticode/go-astiav v0.36.0 => github.com/xaionaro-go/astiav v0.0.0-20251210224931-afff9c0f1cf7
+replace github.com/asticode/go-astiav v0.36.0 => github.com/xaionaro-go/astiav v0.0.0-20251213191451-08d78322abe4
 
 require (
 	github.com/asticode/go-astiav v0.36.0
 	github.com/facebookincubator/go-belt v0.0.0-20250308011339-62fb7027b11f
 	github.com/spf13/pflag v1.0.6
-	github.com/xaionaro-go/avpipeline v0.0.0-20251213160139-acdfe272aae6
+	github.com/xaionaro-go/avpipeline v0.0.0-20251213192556-0e8641193667
 	github.com/xaionaro-go/observability v0.0.0-20250622130956-24b7017284e4
 	github.com/xaionaro-go/secret v0.0.0-20250111141743-ced12e1082c2
 )

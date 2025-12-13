@@ -1,1 +1,3 @@
-.vscode
+/.vscode
+/stream-failover-relay
+/.github/copilot-instructions.md

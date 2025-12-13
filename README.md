@@ -32,7 +32,12 @@ stream-failover-relay \
 
 Here `rtmp://my.server/live/main` will be the primary source, `/opt/brb.mp4` the BRB placeholder, and `rtmp://remote.server/live/out` the output destination.
 
-## Build
+## Install
+
+Go to [Releases](https://github.com/xaionaro-go/stream-failover-relay/releases) and download
+the executable you need.
+
+## Build from the source
 
 ```bash
 apt install -y libavcodec-dev libavdevice-dev libavfilter-dev libavformat-dev libavutil-dev

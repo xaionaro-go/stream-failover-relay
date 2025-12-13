@@ -1,0 +1,270 @@
+name: rolling-release
+
+on:
+  push:
+    branches: ["main", "master"]
+  workflow_dispatch:
+
+concurrency:
+  group: rolling-release
+  cancel-in-progress: true
+
+permissions:
+  contents: write
+
+env:
+  BIN: stream-failover-relay
+  ROLLING_TAG: rolling
+
+jobs:
+  build:
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - id: linux_amd64
+            runs_on: ubuntu-24.04
+            platform: linux
+            arch: amd64
+            archive_ext: tar.gz
+            public_only: false
+
+          - id: linux_arm64
+            runs_on: ubuntu-24.04-arm
+            platform: linux
+            arch: arm64
+            archive_ext: tar.gz
+            public_only: true
+
+          - id: macos_amd64
+            runs_on: macos-14
+            platform: darwin
+            arch: amd64
+            archive_ext: tar.gz
+            public_only: false
+
+          - id: macos_arm64
+            runs_on: macos-14
+            platform: darwin
+            arch: arm64
+            archive_ext: tar.gz
+            public_only: false
+
+          - id: windows_amd64
+            runs_on: windows-latest
+            platform: windows
+            arch: amd64
+            archive_ext: zip
+            public_only: false
+
+    runs-on: ${{ matrix.runs_on }}
+
+    steps:
+      - name: Avoid CRLF issues in MSYS2
+        if: ${{ !(github.event.repository.private && matrix.public_only) && runner.os == 'Windows' }}
+        run: git config --global core.autocrlf input
+
+      - name: Checkout
+        if: ${{ !(github.event.repository.private && matrix.public_only) }}
+        uses: actions/checkout@v4
+
+      - name: Set up Go
+        if: ${{ !(github.event.repository.private && matrix.public_only) }}
+        uses: actions/setup-go@v5
+        with:
+          go-version-file: go.mod
+          cache: true
+
+      # ---- deps: Linux ----
+      - name: Install deps (Linux)
+        if: ${{ !(github.event.repository.private && matrix.public_only) && runner.os == 'Linux' }}
+        uses: ./.github/actions/install-libav-linux
+
+      # ---- deps: macOS ----
+      - name: Install deps (macOS)
+        if: ${{ !(github.event.repository.private && matrix.public_only) && runner.os == 'macOS' }}
+        run: |
+          set -euxo pipefail
+          brew update
+          brew install pkg-config
+          if brew info ffmpeg@7 >/dev/null 2>&1; then
+            brew install ffmpeg@7 || brew upgrade ffmpeg@7
+            brew link --overwrite --force ffmpeg@7
+          else
+            brew install ffmpeg || brew upgrade ffmpeg
+          fi
+          export PKG_CONFIG_PATH="/opt/homebrew/opt/ffmpeg@7/lib/pkgconfig:/usr/local/opt/ffmpeg@7/lib/pkgconfig:/opt/homebrew/lib/pkgconfig:/usr/local/lib/pkgconfig:${PKG_CONFIG_PATH:-}"
+
+      # ---- deps: Windows (MSYS2 UCRT64) ----
+      - name: Setup MSYS2 (Windows)
+        if: ${{ !(github.event.repository.private && matrix.public_only) && runner.os == 'Windows' }}
+        uses: msys2/setup-msys2@v2
+        with:
+          msystem: UCRT64
+          update: true
+          path-type: inherit
+          install: >-
+            git
+            zip
+            mingw-w64-ucrt-x86_64-gcc
+            mingw-w64-ucrt-x86_64-pkg-config
+
+      # ---- build/package: Linux + macOS ----
+      - name: Build & package (Linux/macOS)
+        if: ${{ !(github.event.repository.private && matrix.public_only) && runner.os != 'Windows' }}
+        run: |
+          set -euxo pipefail
+
+          SHA_SHORT="${GITHUB_SHA::7}"
+          VERSION="rolling-${SHA_SHORT}"
+          OUT="dist"
+          STAGE="${OUT}/stage_${{ matrix.id }}"
+          ARCHIVE="${OUT}/${BIN}_${VERSION}_${{ matrix.platform }}_${{ matrix.arch }}.${{ matrix.archive_ext }}"
+
+          rm -rf "${STAGE}"
+          mkdir -p "${STAGE}" "${OUT}"
+
+          CGO_ENABLED=1 go build -trimpath -o "${STAGE}/${BIN}" "."
+
+          tar -czf "${ARCHIVE}" -C "${STAGE}" .
+
+      # ---- build/package: Windows ----
+      - name: Build & package (Windows)
+        if: ${{ !(github.event.repository.private && matrix.public_only) && runner.os == 'Windows' }}
+        shell: msys2 {0}
+        run: |
+          set -euxo pipefail
+
+          # Ensure MSYS2 packages (including FFmpeg headers) are fully up-to-date.
+          pacman -Syu --noconfirm
+
+          # Install FFmpeg development package from MSYS2.
+          pacman -S --noconfirm --needed mingw-w64-ucrt-x86_64-ffmpeg
+          pacman -S --noconfirm --needed mingw-w64-ucrt-x86_64-pkg-config
+
+          SHA_SHORT="${GITHUB_SHA::7}"
+          VERSION="rolling-${SHA_SHORT}"
+          OUT="dist"
+          STAGE="${OUT}/stage_${{ matrix.id }}"
+          ARCHIVE="${OUT}/${BIN}_${VERSION}_${{ matrix.platform }}_${{ matrix.arch }}.${{ matrix.archive_ext }}"
+
+          rm -rf "${STAGE}"
+          mkdir -p "${STAGE}" "${OUT}"
+
+          command -v go
+          go version
+
+          CGO_ENABLED=1 go build -trimpath -o "${STAGE}/${BIN}.exe" "."
+
+          echo "FFmpeg-related DLLs in /ucrt64/bin (diagnostic):"
+          ls -la /ucrt64/bin/avcodec-*.dll /ucrt64/bin/avformat-*.dll /ucrt64/bin/avutil-*.dll 2>/dev/null || true
+
+          # Bundle common runtime DLLs (best-effort for MSYS2/UCRT64)
+          ffmpeg_prefix="$(pkg-config --variable=prefix libavcodec)"
+          ffmpeg_bindir="${ffmpeg_prefix}/bin"
+          cp -f "${ffmpeg_bindir}"/avcodec-*.dll        "${STAGE}/" || true
+          cp -f "${ffmpeg_bindir}"/avformat-*.dll       "${STAGE}/" || true
+          cp -f "${ffmpeg_bindir}"/avutil-*.dll         "${STAGE}/" || true
+          cp -f "${ffmpeg_bindir}"/avdevice-*.dll       "${STAGE}/" || true
+          cp -f "${ffmpeg_bindir}"/avfilter-*.dll       "${STAGE}/" || true
+          cp -f "${ffmpeg_bindir}"/swresample-*.dll     "${STAGE}/" || true
+          cp -f "${ffmpeg_bindir}"/swscale-*.dll        "${STAGE}/" || true
+          cp -f "${ffmpeg_bindir}"/postproc-*.dll       "${STAGE}/" || true
+          cp -f /ucrt64/bin/libwinpthread-1.dll  "${STAGE}/" || true
+          cp -f /ucrt64/bin/libgcc_s_seh-1.dll   "${STAGE}/" || true
+          cp -f /ucrt64/bin/libstdc++-6.dll      "${STAGE}/" || true
+
+          (cd "${STAGE}" && zip -9 -r "../$(basename "${ARCHIVE}")" .)
+
+      - name: Debug dist output (Linux/macOS)
+        if: ${{ !(github.event.repository.private && matrix.public_only) && runner.os != 'Windows' }}
+        run: |
+          set -euxo pipefail
+          echo "PWD: $(pwd)"
+          ls -la
+          echo "dist tree:"
+          find dist -maxdepth 2 -type f -print || true
+
+      - name: Debug dist output (Windows)
+        if: ${{ !(github.event.repository.private && matrix.public_only) && runner.os == 'Windows' }}
+        shell: pwsh
+        run: |
+          $ErrorActionPreference = 'Stop'
+          Write-Host "PWD: $PWD"
+          Get-ChildItem -Force | Format-Table -AutoSize
+          Write-Host "dist tree:"
+          if (Test-Path "dist") {
+            Get-ChildItem -Recurse -File dist | Select-Object -First 200 | ForEach-Object { $_.FullName }
+          } else {
+            Write-Host "dist does not exist"
+          }
+
+      - name: Upload build artifacts
+        if: ${{ !(github.event.repository.private && matrix.public_only) }}
+        uses: actions/upload-artifact@v4
+        with:
+          name: ${{ matrix.id }}
+          path: |
+            dist/*.tar.gz
+            dist/*.zip
+          if-no-files-found: error
+
+  release:
+    runs-on: ubuntu-24.04
+    needs: [build]
+    if: ${{ always() }}
+
+    steps:
+      - name: Checkout (for tagging)
+        uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+          fetch-tags: true
+
+      - name: Download all artifacts
+        uses: actions/download-artifact@v4
+        with:
+          path: dist
+
+      - name: Gather archives + SHA256SUMS
+        run: |
+          set -euxo pipefail
+
+          mkdir -p dist/out
+          find dist -type f \( -name '*.tar.gz' -o -name '*.zip' \) -print -exec cp -f {} dist/out/ \;
+
+          cd dist/out
+          shopt -s nullglob
+          files=( *.tar.gz *.zip )
+          if [ ${#files[@]} -eq 0 ]; then
+            echo "No archives found under dist/out" >&2
+            exit 1
+          fi
+          sha256sum "${files[@]}" > SHA256SUMS
+
+      - name: Move rolling tag to this commit
+        run: |
+          set -euxo pipefail
+          git config user.name  "github-actions[bot]"
+          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+          git tag -f "${ROLLING_TAG}" "${GITHUB_SHA}"
+          git push origin -f "${ROLLING_TAG}"
+
+      - name: Publish/Update rolling GitHub Release
+        uses: ncipollo/release-action@v1
+        with:
+          tag: ${{ env.ROLLING_TAG }}
+          name: rolling
+          prerelease: true
+          allowUpdates: true
+          updateOnlyUnreleased: true
+          removeArtifacts: true
+          replacesArtifacts: true
+          artifacts: "dist/out/*.tar.gz,dist/out/*.zip,dist/out/SHA256SUMS"
+          token: ${{ secrets.GITHUB_TOKEN }}
+          body: |
+            Automated rolling build.
+
+            Commit: ${{ github.sha }}
+            Branch: ${{ github.ref_name }}
+            Workflow run: ${{ github.server_url }}/${{ github.repository }}/actions/runs/${{ github.run_id }}
