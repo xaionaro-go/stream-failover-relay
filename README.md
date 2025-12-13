@@ -32,6 +32,16 @@ stream-failover-relay \
 
 Here `rtmp://my.server/live/main` will be the primary source, `/opt/brb.mp4` the BRB placeholder, and `rtmp://remote.server/live/out` the output destination.
 
+## Caveats
+
+Both sources (primary and fallback) must have the same properties:
+* Resolution.
+* FPS.
+* Codecs.
+* Audio frame Rate.
+* Audio channels.
+* etc.
+
 ## Install
 
 Go to [Releases](https://github.com/xaionaro-go/stream-failover-relay/releases) and download
