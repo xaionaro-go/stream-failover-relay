@@ -26,11 +26,11 @@ Pass-through stream relay that **remuxes without transcoding** and automatically
 ```sh
 stream-failover-relay \
     rtmp://my.server/live/main \
-    /opt/brb.mp4 \
+    /opt/brb.flv \
     rtmp://remote.server/live/out \
 ```
 
-Here `rtmp://my.server/live/main` will be the primary source, `/opt/brb.mp4` the BRB placeholder, and `rtmp://remote.server/live/out` the output destination.
+Here `rtmp://my.server/live/main` will be the primary source, `/opt/brb.flv` the BRB placeholder, and `rtmp://remote.server/live/out` the output destination.
 
 ## Caveats
 
